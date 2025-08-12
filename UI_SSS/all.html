@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Security Dashboard</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #020d1f;
+      background-size: cover;
+      background-position: center;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px;
+      color: #00fff7;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+      text-shadow: 0 0 10px #00fff7;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      max-width: 1000px;
+      width: 100%;
+    }
+
+    .card {
+      background-color: rgba(0, 255, 247, 0.1);
+      border: 2px solid #00fff7;
+      border-radius: 15px;
+      padding: 20px;
+      text-shadow: 0 0 5px #00fff7;
+      box-shadow: 0 0 15px rgba(0, 255, 247, 0.4);
+    }
+
+    .card h2 {
+      margin-top: 0;
+    }
+
+    button {
+      background-color: transparent;
+      border: 2px solid #00fff7;
+      color: #00fff7;
+      padding: 10px 20px;
+      margin-top: 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: all 0.3s;
+    }
+
+    button:hover {
+      background-color: #00fff7;
+      color: #020d1f;
+      transform: scale(1.05);
+    }
+
+    .status {
+      font-size: 1.2rem;
+      margin-top: 10px;
+    }
+
+    .systemMessage {
+      margin-top: 20px;
+      font-size: 1rem;
+      background-color: rgba(0,255,247,0.1);
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px dashed #00fff7;
+    }
+  </style>
+</head>
+<body>
+  <h1>SMART SECURITY SYSTEM DASHBOARD</h1>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Node Connections</h2>
+      <button onclick="connectNode(1)">🔌 Connect Node 1</button>
+      <button onclick="connectNode(2)">📷 Connect Node 2</button>
+      <button onclick="connectNode(3)">🔥 Connect Node 3</button>
+    </div>
+
+    <div class="card">
+      <h2>Manual Control</h2>
+      <button onclick="sendCommand(1, 'ARM')">🔒 Arm System</button>
+      <button onclick="sendCommand(1, 'DISARM')">🔓 Disarm System</button>
+    </div>
+
+    <div class="card">
+      <h2>Status Overview</h2>
+      <div class="status" id="securityStatus">Security: UNKNOWN</div>
+      <div class="status" id="motionStatus">Motion: UNKNOWN</div>
+      <div class="status" id="doorStatus">Door: UNKNOWN</div>
+      <div class="status" id="gasStatus">Gas: UNKNOWN</div>
+      <div class="status" id="gasValue">Gas Value: N/A</div>
+    </div>
+
+    <div class="card">
+      <h2>System Messages</h2>
+      <div class="message" id="systemMessage">Awaiting input...</div>
+    </div>
+  </div>
+
+  <script>
+    let ports = [null, null, null];
+    let textDecoders = [null, null, null];
+    let buffers = ["", "", ""];
+
+    async function connectNode(index) {
+      try {
+        const port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+        ports[index - 1] = port;
+
+        const decoder = new TextDecoderStream();
+        port.readable.pipeTo(decoder.writable);
+        const reader = decoder.readable.getReader();
+        textDecoders[index - 1] = reader;
+
+        log(`✅ Node ${index} connected`);
+        readLoop(index);
+      } catch (e) {
+        log(`❌ Failed to connect Node ${index}: ${e}`);
+      }
+    }
+
+    async function readLoop(nodeIndex) {
+      const reader = textDecoders[nodeIndex - 1];
+      while (true) {
+        try {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) {
+            buffers[nodeIndex - 1] += value;
+            let lines = buffers[nodeIndex - 1].split('\n');
+            buffers[nodeIndex - 1] = lines.pop();
+            lines.forEach(line => processNodeData(nodeIndex, line.trim()));
+          }
+        } catch (error) {
+          log(`❌ Read error Node ${nodeIndex}: ${error}`);
+          break;
+        }
+      }
+    }
+
+    function sendCommand(index, cmd) {
+      const writer = ports[index - 1].writable.getWriter();
+      writer.write(new TextEncoder().encode(cmd + '\n'));
+      writer.releaseLock();
+    }
+
+function processNodeData(index, data) {
+  console.log(`Node ${index}:`, data);
+
+  const systemMessageEl = document.getElementById("systemMessage");
+
+  if (data.startsWith("STATUS:")) {
+    const status = data.split(":")[1];
+    document.getElementById("securityStatus").textContent = `Security: ${status}`;
+
+  } else if (data.startsWith("SECURITY:")) {
+    const parts = data.split(',');
+    const securityState = parts[0].split(':')[1];
+    const motionState = parts[1].split(':')[1];
+    const doorState = parts[2].split(':')[1];
+
+    document.getElementById("securityStatus").textContent = `Security: ${securityState}`;
+    document.getElementById("motionStatus").textContent = `Motion: ${motionState}`;
+    document.getElementById("doorStatus").textContent = `Door: ${doorState}`;
+
+    // Motion detection alert with camera link
+    if (securityState === "ON" && motionState === "YES") {
+      systemMessageEl.innerHTML = `⚠️ Motion detected while armed! <a href="http://192.168.1.11" target="_blank" style="color: #00fff7; text-decoration: underline;">📷 View Camera Feed</a>`;
+    }
+
+  } else if (data.startsWith("GAS:")) {
+    const parts = data.split(':');
+    const gasState = parts[1];
+    const gasValue = parts[2];
+    document.getElementById("gasStatus").textContent = `Gas: ${gasState}`;
+    document.getElementById("gasValue").textContent = `Gas Value: ${gasValue}`;
+    systemMessageEl.textContent = gasState === "DETECTED"
+      ? "🔥 Gas leak detected!"
+      : "✅ Gas levels normal";
+
+  } else if (data.startsWith("ALERT:")) {
+    // General alerts, including wrong password
+    systemMessageEl.textContent = `❗ ${data.replace("ALERT:", "")}`;
+
+  } else if (data.startsWith("KEY:")) {
+    // Optional: Display last key pressed (for debugging)
+    console.log("Key Pressed:", data.split(":")[1]);
+  } else if (data.includes("System Armed from Web") || data.includes("System Disarmed from Web")) {
+    systemMessageEl.textContent = `🔔 ${data}`;
+  }
+}
+
+
+
+    function log(message) {
+      document.getElementById("systemMessage").textContent = message;
+    }
+  </script>
+</body>
+</html>
+
+
